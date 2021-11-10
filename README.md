@@ -1,3 +1,3 @@
-# Project6617
+# Varianc Reduced Hessian Aware Evolutionary Strategies
 
-Xujia Liu, Steven Yin, Zitong Wang, and Tingting Ou
+Authors: Xujia Liu, Steven Yin, Zitong Wang, and Tingting Ou
