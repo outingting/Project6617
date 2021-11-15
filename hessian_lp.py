@@ -49,7 +49,9 @@ def Hessian_LP(sigma, theta, num_samples):
             H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
             H[1:j+1,j] = H[j,1:j+1]
     
-    return H
+        return H
+    
+    return None
 
 
 sigma = 0.01
