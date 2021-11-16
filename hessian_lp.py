@@ -17,12 +17,31 @@ def F(theta):
     return -np.sum((theta - 0.5) ** 2, axis=tuple(range(theta.ndim)[1:]))
 
 
-def Hessian_LP(sigma, theta, num_samples):
+def Gradient_LP(theta, sigma, epsilons):
     
-    d = len(theta)
-    n = num_samples
+    n, d = epsilons.shape
     
-    epsilons = np.random.multivariate_normal(mean = np.zeros(d), cov = np.identity(d), size = n)
+    y = (F(theta + sigma*epsilons) - F(theta)) / sigma
+    
+    var_z = cp.Variable(n)
+    var_g = cp.Variable(d)
+    
+    obj = sum(var_z)
+    constraints = [var_z >= y - epsilons @ var_g,
+                   var_z >= -y + epsilons @ var_g]
+
+    prob = cp.Problem(cp.Minimize(obj), constraints)
+    prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+    
+    if prob.status == 'optimal':
+        return var_g.value
+    
+    return None
+    
+
+def Hessian_LP(theta, sigma, epsilons):
+    
+    n, d = epsilons.shape
     
     y = (F(theta + sigma*epsilons) + F(theta - sigma*epsilons) - 2*F(theta)) / (sigma**2)
     X = np.zeros((n, d*(d+1)//2))
@@ -54,12 +73,26 @@ def Hessian_LP(sigma, theta, num_samples):
     return None
 
 
-sigma = 0.01
-theta = np.random.uniform(-10,10,5)
-n = 50
+sigma = 0.05
+np.random.seed(0)
+# theta = np.random.uniform(-5,5,5)
+theta = 0.5 * np.ones(5)
+n = 100
+d = len(theta)
 
-H = Hessian_LP(sigma, theta, n)
+print('theta:')
+print(theta)
+
+epsilons = np.random.multivariate_normal(mean = np.zeros(d), cov = np.identity(d), size = n)
+
+g = Gradient_LP(theta, sigma, epsilons)
+print('gradient:')
+print(g)
+
+H = Hessian_LP(theta, sigma, epsilons)
+print('Hessian:')
 print(H)
+
 
 
 
