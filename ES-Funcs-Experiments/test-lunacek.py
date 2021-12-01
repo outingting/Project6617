@@ -24,7 +24,7 @@ def lunacek(theta):
 def F(theta):
     if theta.ndim == 1:
         theta = np.expand_dims(theta, 0)
-    return np.apply_along_axis(lunacek, 1, theta)
+    return -np.apply_along_axis(lunacek, 1, theta)
 
 plt.figure(4)
 

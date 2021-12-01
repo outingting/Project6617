@@ -8,12 +8,12 @@ import cvxpy as cp
 import matplotlib.pyplot as plt 
 
 def rastrigin(theta):
-    return -10*theta.shape[0] - np.sum(theta**2 - 10*np.cos(2*math.pi*theta))
+    return 10*theta.shape[0] + np.sum(theta**2 - 10*np.cos(2*math.pi*theta))
 
 def F(theta):
     if theta.ndim == 1:
         theta = np.expand_dims(theta, 0)
-    return np.apply_along_axis(rastrigin, 1, theta)
+    return -np.apply_along_axis(rastrigin, 1, theta)
 
 plt.figure(3)
 
