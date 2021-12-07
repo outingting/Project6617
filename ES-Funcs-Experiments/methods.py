@@ -261,8 +261,87 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
 
 	return theta_t, F(theta_t), H, lst_evals, lst_f
 
+# Obtain the PT inverse (Negative definite version)
+# Input: diagonal of the diagonal matrix obtained from svd [diag(\Lambda), H = U \Lambda V]
+# Output: diagonal of the diagonal matrix of the svd of PT inverse [diag(\Lambda^{-1}_{PT})]
+def get_PTinverse(diag_H, PT_threshold=-0.01):
+    # Assume we are solving a maximization problem and the estimated Hessian is expected to be Negative definite
+    diag_H[diag_H >= PT_threshold] = PT_threshold
+    return diag_H ** (-1)
 
 
+# PT inverse
+# Non- antithetic
+# fixed step size
+def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda = 1e-6):
+	count = 0
+	lst_evals = []
+	lst_f = []
+	d = theta_0.shape[0]
+	n = num_samples
+	theta_t = theta_0
+	for t in range(time_steps):
+		# **** sample epsilons, record some parameters & function values ****#
+		epsilons = np.random.multivariate_normal(mean=np.zeros(d), cov=np.identity(d), size=num_samples)  # n by d
+		F_plus = F(theta_t + sigma * epsilons)
+		F_minus = F(theta_t - sigma * epsilons)
+		count += 2 * num_samples
+
+		# **** estimate Hessian ****#
+		y = (F_plus + F_minus - 2 * F(theta_t)) / (sigma ** 2)
+		var_z = cp.Variable(n)
+		var_H_diag = cp.Variable(d)
+		dct_mtx = get_dct_mtx(d)
+		obj = sum(var_z)
+		constraints = []
+		for i in range(n):
+			Uv = epsilons[i:i + 1, :] @ dct_mtx
+			Uv_sq = Uv * Uv
+			constraints += [var_z[i] >= y[i] - Uv_sq @ var_H_diag]
+			constraints += [var_z[i] >= - y[i] + Uv_sq @ var_H_diag]
+		for i in range(d):
+			constraints += [var_H_diag[i] <= 0]
+		prob = cp.Problem(cp.Minimize(obj), constraints)
+		prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+		# if prob.status == 'optimal':
+		# 	H = dct_mtx @ np.diag(var_H_diag.value) @ np.transpose(dct_mtx)
+		# 	# if np.linalg.det(H) == 0:
+		# 	H -= H_lambda * np.identity(d)
+		# else:
+		# 	print("LP not optimized for the structured Hessian method.")
+		# 	return None
+		if not prob.status == 'optimal':
+			print("LP not optimized for the structured Hessian method.")
+			return None
+
+		# **** estimate gradient (by using the method above) ****#
+		y = (F_plus - F(theta_t)) / sigma
+		g = LP_Gradient(y, epsilons)
+
+		# **** update using Newton's method ****#
+		theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+
+		# Can delete, not really useful
+		H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
+
+		# **** record current status ****#
+		lst_evals.append(count)
+		lst_f.append(F(theta_t))
+
+	return theta_t, F(theta_t), H, lst_evals, lst_f
+
+
+# PT inverse
+# antithetic
+# fixed step size
+def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda=1e-6):
+	pass
+
+# PT inverse
+# antithetic
+# adaptive step size
+def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda=1e-6):
+	pass
 
 
 

@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.stats import multivariate_normal
-from methods import ES_Hessian, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured
+from methods import ES_Hessian, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured, LP_Hessian_structured_v2
 import cvxpy as cp
 import matplotlib.pyplot as plt 
 
@@ -30,6 +30,9 @@ res = LP_Hessian(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples =
 plt.plot(res[3], res[4], label = "LP_Hessian")
 
 res = LP_Hessian_structured(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured")
+
+res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 plt.plot(res[3], res[4], label = "LP_Hessian_structured")
 
 plt.legend(loc="lower right")
