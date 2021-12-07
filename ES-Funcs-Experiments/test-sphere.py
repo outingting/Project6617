@@ -17,23 +17,29 @@ plt.figure(1)
 np.random.seed(1)
 initial_pt = np.random.uniform(-2,2,5)
 
+print("ES vanilla gradient ...")
 res = ES_vanilla_gradient(F, alpha=0.005, sigma=0.05, theta_0=initial_pt, num_samples = 100, time_steps = 200)
 plt.plot(res[3], res[4], label = "ES_vanilla_gradient")
 
+print("ES Hessian ...")
 res = ES_Hessian(F, alpha=0.3, sigma=0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 plt.plot(res[3], res[4], label = "ES_Hessian")
 
+print("Hess-Aware ...")
 res = Hess_Aware(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 67)
 plt.plot(res[3], res[4], label = "Hess_Aware")
 
+print("LP Hessian ...")
 res = LP_Hessian(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 plt.plot(res[3], res[4], label = "LP_Hessian")
 
+print("LP structured Hessian ...")
 res = LP_Hessian_structured(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 plt.plot(res[3], res[4], label = "LP_Hessian_structured")
 
+print("LP structured Hessian with PT inverse ...")
 res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
-plt.plot(res[3], res[4], label = "LP_Hessian_structured")
+plt.plot(res[3], res[4], label = "LP_Hessian_structured_v2")
 
 plt.legend(loc="lower right")
 plt.xlabel("# function calls")
