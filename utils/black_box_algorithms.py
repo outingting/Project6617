@@ -93,8 +93,6 @@ def main_algo_structured_Hessian(params):
     rewards = []
     samples = []
     alphas = []
-    G = [] 
-    
     
     while n_iter < params['max_iter']:
             
@@ -104,11 +102,6 @@ def main_algo_structured_Hessian(params):
         ts.append(ts_cumulative)
         alphas.append(params['alpha'])
 
-        if n_iter == 1:
-            G = np.array(gradient)
-        else:
-            G *= params['decay']
-            G = np.vstack([G, gradient])
         n_eps += 2 * n_samples
         rollouts.append(n_eps)
         gradient /= (np.linalg.norm(gradient) / master.N + 1e-8)
