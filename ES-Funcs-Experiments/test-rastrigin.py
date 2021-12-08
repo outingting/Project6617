@@ -35,18 +35,18 @@ plt.plot(res[3], res[4], label = "Hess_Aware")
 print("LP Hessian")
 res = LP_Hessian(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 plt.plot(res[3], res[4], label = "LP_Hessian")
-#
+
 # print("LP Hessian structured")
 # res = LP_Hessian_structured(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
 # plt.plot(res[3], res[4], label = "LP_Hessian_structured")
-#
-# print("LP Hessian structured with PT inverse")
-# res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
-# plt.plot(res[3], res[4], label = "LP_Hessian_structured_v2")
-#
-# print("LP Hessian structured with PT inverse and antithetic samples")
-# res = LP_Hessian_structured_v3(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
-# plt.plot(res[3], res[4], label = "LP_Hessian_structured_v3")
+
+print("LP Hessian structured with PT inverse")
+res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured_v2")
+
+print("LP Hessian structured with PT inverse and antithetic samples")
+res = LP_Hessian_structured_v3(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured_v3")
 
 print("LP Hessian structured with PT inverse, antithetic samples and backtracking")
 res = LP_Hessian_structured_v4(F, alpha = 1e-6, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100)
