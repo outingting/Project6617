@@ -31,16 +31,22 @@ def get_dct_mtx(d):
     # DCT matrix
     # unitary, symmetric and real
     # Orthonormal eigenbasis for structured H
-    n = 2*d
+    n = 2*(d-1)
+    dct_mtx = np.zeros([d,d])
     i_idx = np.array([range(n//2 )])
+    i_idx = i_idx[:,1:]
     idx = 2 * np.transpose(i_idx) @ i_idx
-    dct_mtx = np.cos(idx*np.pi / n) * 2 / np.sqrt(d)
-    dct_mtx[0,0] = 1
-    dct_mtx[0,d-1] = 1
-    dct_mtx[d-1,0] = 1
-    dct_mtx[d-1,d-1] = (-1)**(d)
+    dct_mtx[1:-1,1:-1] = np.cos(idx*np.pi / n) * 2 / np.sqrt(d)
+    for ii in range(d):
+        dct_mtx[ii,0] = np.sqrt(2)
+        dct_mtx[0,ii] = np.sqrt(2)
+        dct_mtx[ii,-1] = (-1)**(ii) * np.sqrt(2)
+        dct_mtx[-1,ii] = (-1)**(ii) * np.sqrt(2)
+    dct_mtx[0, 0] = 1
+    dct_mtx[0, d - 1] = 1
+    dct_mtx[d - 1, 0] = 1
+    dct_mtx[d - 1, d - 1] = (-1)**(d-1)
     return dct_mtx
-
 
 #########################################################################################################
 
@@ -259,6 +265,8 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
         y = (F_plus - F(theta_t)) / sigma
         g = LP_Gradient(y, epsilons)
 
+        # import pdb; pdb.set_trace()
+
         #**** update using Newton's method ****#
         theta_t -= alpha * np.linalg.inv(H)@g
 
@@ -273,7 +281,7 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
 # Obtain the PT inverse (Negative definite version)
 # Input: diagonal of the diagonal matrix obtained from svd [diag(\Lambda), H = U \Lambda V]
 # Output: diagonal of the diagonal matrix of the svd of PT inverse [diag(\Lambda^{-1}_{PT})]
-def get_PTinverse(diag_H, PT_threshold=-0.01):
+def get_PTinverse(diag_H, PT_threshold=-1e-6):
     # Assume we are solving a maximization problem and the estimated Hessian is expected to be Negative definite
     diag_H[diag_H >= PT_threshold] = PT_threshold
     return diag_H ** (-1)
@@ -334,6 +342,8 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 
         # Can delete, not really useful
         H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
+
+        import pdb; pdb.set_trace()
 
         # **** record current status ****#
         lst_evals.append(count)
