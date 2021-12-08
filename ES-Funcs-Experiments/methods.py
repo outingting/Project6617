@@ -462,7 +462,6 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
         # backtracking
         cnt = 0
         while F(theta_t_)[0] < (F_t - alpha * eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g)))[0]:
-            print(cnt)
             if cnt >= 10:
                 break
             cnt += 1

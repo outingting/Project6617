@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.stats import multivariate_normal
-from methods import ES_Hessian, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured
+from methods import ES_Hessian, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured, LP_Hessian_structured_v2, LP_Hessian_structured_v3, LP_Hessian_structured_v4
 import cvxpy as cp
 import matplotlib.pyplot as plt 
 
@@ -37,6 +37,15 @@ plt.plot(res[3], res[4], label = "LP_Hessian")
 
 res = LP_Hessian_structured(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 200)
 plt.plot(res[3], res[4], label = "LP_Hessian_structured")
+
+res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 200)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured v2")
+
+res = LP_Hessian_structured_v3(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 200)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured v3")
+
+res = LP_Hessian_structured_v4(F, alpha = 0.01, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 200)
+plt.plot(res[3], res[4], label = "LP_Hessian_structured v4")
 
 plt.legend(loc="lower right")
 plt.xlabel("# function calls")
