@@ -17,7 +17,7 @@ def get_dct_mtx(d):
     i_idx = np.array([range(n//2 )])
     i_idx = i_idx[:,1:]
     idx = 2 * np.transpose(i_idx) @ i_idx
-    dct_mtx[1:-1,1:-1] = np.cos(idx*np.pi / n) * 2 / np.sqrt(d)
+    dct_mtx[1:-1,1:-1] = np.cos(idx*np.pi / n) * 2
     for ii in range(d):
         dct_mtx[ii,0] = np.sqrt(2)
         dct_mtx[0,ii] = np.sqrt(2)
@@ -27,6 +27,7 @@ def get_dct_mtx(d):
     dct_mtx[0, d - 1] = 1
     dct_mtx[d - 1, 0] = 1
     dct_mtx[d - 1, d - 1] = (-1)**(d-1)
+    dct_mtx = dct_mtx / np.sqrt(d)
     return dct_mtx
 
 
@@ -71,9 +72,9 @@ def Hessian_LP_structured(sigma, theta, num_samples):
 
 
 sigma = 0.01
-theta = np.random.uniform(-10,10,3)
+theta = np.random.uniform(-10,10,4)
 
-n = 1000
+n = 100
 H_structured = Hessian_LP_structured(sigma, theta, n)
 
 print(H_structured)

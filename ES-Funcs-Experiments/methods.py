@@ -36,7 +36,7 @@ def get_dct_mtx(d):
     i_idx = np.array([range(n//2 )])
     i_idx = i_idx[:,1:]
     idx = 2 * np.transpose(i_idx) @ i_idx
-    dct_mtx[1:-1,1:-1] = np.cos(idx*np.pi / n) * 2 / np.sqrt(d)
+    dct_mtx[1:-1,1:-1] = np.cos(idx*np.pi / n) * 2
     for ii in range(d):
         dct_mtx[ii,0] = np.sqrt(2)
         dct_mtx[0,ii] = np.sqrt(2)
@@ -46,7 +46,9 @@ def get_dct_mtx(d):
     dct_mtx[0, d - 1] = 1
     dct_mtx[d - 1, 0] = 1
     dct_mtx[d - 1, d - 1] = (-1)**(d-1)
+    dct_mtx = dct_mtx / np.sqrt(d)
     return dct_mtx
+
 
 #########################################################################################################
 
@@ -342,8 +344,6 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 
         # Can delete, not really useful
         H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
-
-        import pdb; pdb.set_trace()
 
         # **** record current status ****#
         lst_evals.append(count)

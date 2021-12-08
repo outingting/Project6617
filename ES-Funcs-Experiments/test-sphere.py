@@ -39,7 +39,7 @@ res = LP_Hessian_structured(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, nu
 plt.plot(res[3], res[4], label = "LP_Hessian_structured")
 
 print("LP structured Hessian with PT inverse ...")
-res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 100, seed=1)
+res = LP_Hessian_structured_v2(F, alpha = 0.1, sigma = 0.05, theta_0=initial_pt, num_samples = 100, time_steps = 1000, seed=1)
 plt.plot(res[3], res[4], label = "LP_Hessian_structured_v2")
 
 print("LP structured Hessian with PT inverse and antithetic samples ...")
