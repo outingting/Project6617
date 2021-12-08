@@ -196,9 +196,17 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
         #**** estimate Hessian using the LP method ****#
         y = (F_plus + F_minus - 2*F(theta_t)) / (sigma**2)
         X = np.zeros((n, d*(d+1)//2))
+        idx = 0
         for j in range(d):
-            X[:,j*(j+1)//2:(j+1)*(j+2)//2-1] = 2 * epsilons[:,j:j+1] * epsilons[:,:j]
-            X[:,(j+1)*(j+2)//2-1] = epsilons[:,j]**2
+            X[:,idx] = epsilons[:,j]**2
+            idx += 1
+            if j == d-1:
+                break
+            X[:,idx:idx+d-j-1] = 2 * epsilons[:,j:j+1] * epsilons[:,j+1:]
+            idx += d-j-1
+#         for j in range(d):
+#             X[:,j*(j+1)//2:(j+1)*(j+2)//2-1] = 2 * epsilons[:,j:j+1] * epsilons[:,:j]
+#             X[:,(j+1)*(j+2)//2-1] = epsilons[:,j]**2
         var_z = cp.Variable(n)
         var_H = cp.Variable(d*(d+1)//2)
         obj = sum(var_z)
@@ -210,9 +218,14 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
         prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
         if prob.status == 'optimal':
             H = np.zeros((d,d))
+            idx = 0
             for j in range(d):
-                H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
-                H[1:j+1,j] = H[j,1:j+1]
+                H[j,j:] = var_H[idx:idx+d-j].value
+                H[j:,j] = var_H[idx:idx+d-j].value
+                idx += d-j
+#             for j in range(d):
+#                 H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
+#                 H[1:j+1,j] = H[j,1:j+1]
         else:
             print("LP not optimized for LP Hessian method.")
             return None
