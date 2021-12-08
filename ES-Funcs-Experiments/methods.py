@@ -52,7 +52,7 @@ def get_dct_mtx(d):
 # Obtain the PT inverse (Negative definite version)
 # Input: diagonal of the diagonal matrix obtained from svd [diag(\Lambda), H = U \Lambda V]
 # Output: diagonal of the diagonal matrix of the svd of PT inverse [diag(\Lambda^{-1}_{PT})]
-def get_PTinverse(diag_H, PT_threshold=-1e-6):
+def get_PTinverse(diag_H, PT_threshold=-1e1):
     # Assume we are solving a maximization problem and the estimated Hessian is expected to be Negative definite
     diag_H[diag_H >= PT_threshold] = PT_threshold
     return diag_H ** (-1)
@@ -322,13 +322,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
             constraints += [var_H_diag[i] <= 0]
         prob = cp.Problem(cp.Minimize(obj), constraints)
         prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
-        # if prob.status == 'optimal':
-        # 	H = dct_mtx @ np.diag(var_H_diag.value) @ np.transpose(dct_mtx)
-        # 	# if np.linalg.det(H) == 0:
-        # 	H -= H_lambda * np.identity(d)
-        # else:
-        # 	print("LP not optimized for the structured Hessian method.")
-        # 	return None
+
         if not prob.status == 'optimal':
             print("LP not optimized for the structured Hessian method.")
             return None
@@ -338,6 +332,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
         g = LP_Gradient(y, epsilons)
 
         # **** update using Newton's method ****#
+        # import pdb; pdb.set_trace()
         theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
 
         # Can delete, not really useful
@@ -462,7 +457,8 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
         # backtracking
         cnt = 0
         while F(theta_t_)[0] < (F_t - alpha * eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g)))[0]:
-            if cnt >= 10:
+            print(cnt)
+            if cnt >= 30:
                 break
             cnt += 1
             eta *= beta
