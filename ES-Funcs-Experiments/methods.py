@@ -52,11 +52,15 @@ def get_dct_mtx(d):
 # Obtain the PT inverse (Negative definite version)
 # Input: diagonal of the diagonal matrix obtained from svd [diag(\Lambda), H = U \Lambda V]
 # Output: diagonal of the diagonal matrix of the svd of PT inverse [diag(\Lambda^{-1}_{PT})]
-def get_PTinverse(diag_H, PT_threshold=-1e1):
+def get_PTinverse(diag_H, PT_threshold=-1e0):
     # Assume we are solving a maximization problem and the estimated Hessian is expected to be Negative definite
     diag_H[diag_H >= PT_threshold] = PT_threshold
     return diag_H ** (-1)
 
+def simulation_Gradient(F_val, num_samples, epsilons, sigma):
+    F_val = F_val.reshape(1, num_samples)
+    g = (F_val @ epsilons).ravel() / (sigma * num_samples)
+    return g
 
 #########################################################################################################
 
@@ -196,9 +200,17 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
         #**** estimate Hessian using the LP method ****#
         y = (F_plus + F_minus - 2*F(theta_t)) / (sigma**2)
         X = np.zeros((n, d*(d+1)//2))
+        idx = 0
         for j in range(d):
-            X[:,j*(j+1)//2:(j+1)*(j+2)//2-1] = 2 * epsilons[:,j:j+1] * epsilons[:,:j]
-            X[:,(j+1)*(j+2)//2-1] = epsilons[:,j]**2
+            X[:,idx] = epsilons[:,j]**2
+            idx += 1
+            if j == d-1:
+                break
+            X[:,idx:idx+d-j-1] = 2 * epsilons[:,j:j+1] * epsilons[:,j+1:]
+            idx += d-j-1
+#         for j in range(d):
+#             X[:,j*(j+1)//2:(j+1)*(j+2)//2-1] = 2 * epsilons[:,j:j+1] * epsilons[:,:j]
+#             X[:,(j+1)*(j+2)//2-1] = epsilons[:,j]**2
         var_z = cp.Variable(n)
         var_H = cp.Variable(d*(d+1)//2)
         obj = sum(var_z)
@@ -210,25 +222,17 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
         prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
         if prob.status == 'optimal':
             H = np.zeros((d,d))
+            idx = 0
             for j in range(d):
-                H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
-                H[1:j+1,j] = H[j,1:j+1]
+                H[j,j:] = var_H[idx:idx+d-j].value
+                H[j:,j] = var_H[idx:idx+d-j].value
+                idx += d-j
+#             for j in range(d):
+#                 H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
+#                 H[1:j+1,j] = H[j,1:j+1]
         else:
             print("LP not optimized for LP Hessian method.")
             return None
-
-        #**** estimate gradient (by using the method above) ****#
-        y = (F_plus - F(theta_t)) / sigma
-        g = LP_Gradient(y, epsilons)
-
-        #**** update using Newton's method ****#
-        theta_t -= alpha * np.linalg.inv(H)@g
-
-        #**** record current status ****#
-        lst_evals.append(count)
-        lst_f.append(F(theta_t))
-
-    return theta_t, F(theta_t), H, lst_evals, lst_f
 
 #########################################################################################################
 
@@ -291,6 +295,7 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
 # PT inverse
 # Non- antithetic
 # fixed step size
+# LP gradient
 def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda = 1e-6, seed=1):
     np.random.seed(seed)
     count = 0
@@ -349,6 +354,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 # PT inverse
 # antithetic
 # fixed step size
+# LP gradient
 def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda=1e-6, seed=1):
     np.random.seed(seed)
     count = 0
@@ -389,6 +395,7 @@ def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, 
         # **** estimate gradient (by using the method above) ****#
         y_antithetic = (np.concatenate([F_plus,F_minus]) - F_theta) / sigma
         g = LP_Gradient(y_antithetic, epsilons_antithetic)
+        #####
 
         # **** update using Newton's method ****#
         theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
@@ -408,7 +415,8 @@ def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, 
 # PT inverse
 # antithetic
 # adaptive step size (backtracking)
-def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda=1e-6, seed=1, beta=0.5):
+# LP gradient
+def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1, beta=0.5):
     np.random.seed(seed)
     count = 0
     lst_evals = []
@@ -424,7 +432,7 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
         F_plus = F(theta_t + sigma * epsilons)
         F_minus = F(theta_t - sigma * epsilons)
         F_theta = F(theta_t)
-        count += 2 * num_samples
+        count += 2 * num_samples + 1
 
         # **** estimate Hessian ****#
         y = (F_plus + F_minus - 2 * F_theta) / (sigma ** 2)
@@ -451,19 +459,19 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
         g = LP_Gradient(y_antithetic, epsilons_antithetic)
 
         # **** update using Newton's method ****#
-        theta_t_ = theta_t -  eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+        theta_t_ = theta_t -  eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
         F_t = F(theta_t)
 
         # backtracking
         cnt = 0
-        while F(theta_t_)[0] < (F_t - alpha * eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g)))[0]:
-            print(cnt)
+        while F(theta_t_)[0] < (F_t + alpha * eta * np.transpose(g) @ dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g)))[0]:
             if cnt >= 30:
                 break
             cnt += 1
             eta *= beta
             theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
         theta_t = theta_t_
+        count += cnt
 
         # Can delete, not really useful
         H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
@@ -475,7 +483,154 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
 
     return theta_t, F(theta_t), H, lst_evals, lst_f
 
+#########################################################################################################
 
+# PT inverse
+# antithetic
+# adaptive step size (backtracking)
+# simulation gradient
+def LP_Hessian_structured_v5(F, alpha, sigma, sigma_g, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1, beta=0.5):
+    np.random.seed(seed)
+    count = 0
+    lst_evals = []
+    lst_f = []
+    d = theta_0.shape[0]
+    n = num_samples
+    theta_t = copy.deepcopy(theta_0)
+    for t in range(time_steps):
+        eta = 1
+        # **** sample epsilons, record some parameters & function values ****#
+        epsilons = np.random.multivariate_normal(mean=np.zeros(d), cov=np.identity(d), size=num_samples)  # n by d
+        epsilons_antithetic = np.vstack([epsilons, -epsilons])
+        F_plus = F(theta_t + sigma * epsilons)
+        F_minus = F(theta_t - sigma * epsilons)
+        F_theta = F(theta_t)
+        count += 2 * num_samples + 1
+
+        # **** estimate Hessian ****#
+        y = (F_plus + F_minus - 2 * F_theta) / (sigma ** 2)
+        var_z = cp.Variable(n)
+        var_H_diag = cp.Variable(d)
+        dct_mtx = get_dct_mtx(d)
+        obj = sum(var_z)
+        constraints = []
+        for i in range(n):
+            Uv = epsilons[i:i + 1, :] @ dct_mtx
+            Uv_sq = Uv * Uv
+            constraints += [var_z[i] >= y[i] - Uv_sq @ var_H_diag]
+            constraints += [var_z[i] >= - y[i] + Uv_sq @ var_H_diag]
+        for i in range(d):
+            constraints += [var_H_diag[i] <= 0]
+        prob = cp.Problem(cp.Minimize(obj), constraints)
+        prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+        if not prob.status == 'optimal':
+            print("LP not optimized for the structured Hessian method:(")
+            return None
+
+        # **** estimate gradient (by using the method above) ****#
+        # y_antithetic = (np.concatenate([F_plus,F_minus]) - F_theta) / sigma
+        # g = LP_Gradient(y_antithetic, epsilons_antithetic)
+        g = simulation_Gradient(np.concatenate([F_plus, F_minus]), 2*num_samples, np.vstack([epsilons, -epsilons]), sigma_g)
+
+        # **** update using Newton's method ****#
+        theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
+        F_t = F(theta_t)
+
+        # backtracking
+        cnt = 0
+        while F(theta_t_)[0] < (F_t + alpha * eta * np.transpose(g) @ dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g)))[0]:
+            if cnt >= 30:
+                break
+            cnt += 1
+            eta *= beta
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+        theta_t = theta_t_
+        count += cnt
+
+        # Can delete, not really useful
+        H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
+
+        # import pdb; pdb.set_trace()
+        # **** record current status ****#
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+
+    return theta_t, F(theta_t), H, lst_evals, lst_f
+
+#########################################################################################################
+
+# PT inverse
+# antithetic
+# adaptive step size (backtracking)
+# linear regression Hessian
+def LP_Hessian_structured_v6(F, alpha, sigma, sigma_g, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1, beta=0.5):
+    np.random.seed(seed)
+    count = 0
+    lst_evals = []
+    lst_f = []
+    d = theta_0.shape[0]
+    n = num_samples
+    theta_t = copy.deepcopy(theta_0)
+    for t in range(time_steps):
+        eta = 1
+        # **** sample epsilons, record some parameters & function values ****#
+        epsilons = np.random.multivariate_normal(mean=np.zeros(d), cov=np.identity(d), size=num_samples)  # n by d
+        epsilons_antithetic = np.vstack([epsilons, -epsilons])
+        F_plus = F(theta_t + sigma * epsilons)
+        F_minus = F(theta_t - sigma * epsilons)
+        F_theta = F(theta_t)
+        count += 2 * num_samples + 1
+
+        # **** estimate Hessian ****#
+        # y = (F_plus + F_minus - 2 * F_theta) / (sigma ** 2)
+        # var_z = cp.Variable(n)
+        # var_H_diag = cp.Variable(d)
+        # dct_mtx = get_dct_mtx(d)
+        # obj = sum(var_z)
+        # constraints = []
+        # for i in range(n):
+        #     Uv = epsilons[i:i + 1, :] @ dct_mtx
+        #     Uv_sq = Uv * Uv
+        #     constraints += [var_z[i] >= y[i] - Uv_sq @ var_H_diag]
+        #     constraints += [var_z[i] >= - y[i] + Uv_sq @ var_H_diag]
+         # for i in range(d):
+        #     constraints += [var_H_diag[i] <= 0]
+        # prob = cp.Problem(cp.Minimize(obj), constraints)
+        # prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+        # if not prob.status == 'optimal':
+        #     print("LP not optimized for the structured Hessian method:(")
+        #     return None
+
+        # **** estimate gradient (by using the method above) ****#
+        y_antithetic = (np.concatenate([F_plus,F_minus]) - F_theta) / sigma
+        g = LP_Gradient(y_antithetic, epsilons_antithetic)
+
+        # **** update using Newton's method ****#
+        theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
+        F_t = F(theta_t)
+
+        # backtracking
+        cnt = 0
+        while F(theta_t_)[0] < (
+                F_t + alpha * eta * np.transpose(g) @ dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g)))[
+            0]:
+            if cnt >= 30:
+                break
+            cnt += 1
+            eta *= beta
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+        theta_t = theta_t_
+        count += cnt
+
+        # Can delete, not really useful
+        H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
+
+        # import pdb; pdb.set_trace()
+        # **** record current status ****#
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+
+    return theta_t, F(theta_t), H, lst_evals, lst_f
 
 
 
