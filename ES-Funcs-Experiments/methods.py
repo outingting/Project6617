@@ -296,7 +296,7 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
 # Non- antithetic
 # fixed step size
 # LP gradient
-def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda = 1e-6, seed=1):
+def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1):
     np.random.seed(seed)
     count = 0
     lst_evals = []
@@ -338,7 +338,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 
         # **** update using Newton's method ****#
         # import pdb; pdb.set_trace()
-        theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+        theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value,PT_threshold)) @ (dct_mtx @ g))
 
         # Can delete, not really useful
         H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
@@ -355,7 +355,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 # antithetic
 # fixed step size
 # LP gradient
-def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, H_lambda=1e-6, seed=1):
+def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1):
     np.random.seed(seed)
     count = 0
     lst_evals = []
@@ -398,7 +398,7 @@ def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, 
         #####
 
         # **** update using Newton's method ****#
-        theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+        theta_t -= alpha * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value,PT_threshold)) @ (dct_mtx @ g))
 
         # Can delete, not really useful
         H = dct_mtx @ np.diag(var_H_diag.value) @ dct_mtx
