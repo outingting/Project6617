@@ -296,6 +296,7 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
 # Non- antithetic
 # fixed step size
 # LP gradient
+## [not stable]
 def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1):
     np.random.seed(seed)
     count = 0
@@ -355,6 +356,7 @@ def LP_Hessian_structured_v2(F, alpha, sigma, theta_0, num_samples, time_steps, 
 # antithetic
 # fixed step size
 # LP gradient
+## [not stable]
 def LP_Hessian_structured_v3(F, alpha, sigma, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1):
     np.random.seed(seed)
     count = 0
@@ -469,7 +471,7 @@ def LP_Hessian_structured_v4(F, alpha, sigma, theta_0, num_samples, time_steps, 
                 break
             cnt += 1
             eta *= beta
-            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
         theta_t = theta_t_
         count += cnt
 
@@ -543,7 +545,7 @@ def LP_Hessian_structured_v5(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
                 break
             cnt += 1
             eta *= beta
-            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
         theta_t = theta_t_
         count += cnt
 
@@ -562,7 +564,7 @@ def LP_Hessian_structured_v5(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
 # PT inverse
 # antithetic
 # adaptive step size (backtracking)
-# linear regression Hessian
+# linear regression Hessian (non-positive constrained QP)
 def LP_Hessian_structured_v6(F, alpha, sigma, sigma_g, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1, beta=0.5):
     np.random.seed(seed)
     count = 0
@@ -616,7 +618,7 @@ def LP_Hessian_structured_v6(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
                 break
             cnt += 1
             eta *= beta
-            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value)) @ (dct_mtx @ g))
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(var_H_diag.value, PT_threshold)) @ (dct_mtx @ g))
         theta_t = theta_t_
         count += cnt
 
@@ -630,5 +632,64 @@ def LP_Hessian_structured_v6(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
 
     return theta_t, F(theta_t), H, lst_evals, lst_f
 
+#########################################################################################################
 
+# PT inverse
+# antithetic
+# adaptive step size (backtracking)
+# linear regression Hessian (unconstrained)
+def LP_Hessian_structured_v7(F, alpha, sigma, sigma_g, theta_0, num_samples, time_steps, PT_threshold=-1e0, seed=1, beta=0.7):
+    np.random.seed(seed)
+    count = 0
+    lst_evals = []
+    lst_f = []
+    d = theta_0.shape[0]
+    n = num_samples
+    theta_t = copy.deepcopy(theta_0)
+    for t in range(time_steps):
+        eta = 1
+        # **** sample epsilons, record some parameters & function values ****#
+        epsilons = np.random.multivariate_normal(mean=np.zeros(d), cov=np.identity(d), size=num_samples)  # n by d
+        epsilons_antithetic = np.vstack([epsilons, -epsilons])
+        F_plus = F(theta_t + sigma * epsilons)
+        F_minus = F(theta_t - sigma * epsilons)
+        F_theta = F(theta_t)
+        count += 2 * num_samples + 1
+
+        # Estimate Hessian
+        y = (F_plus + F_minus - 2*F_theta) / (sigma**2)
+        dct_mtx = get_dct_mtx(d)
+        V = epsilons @ dct_mtx
+        V = V * V
+        H_diag = np.linalg.inv(np.transpose(V) @ V + 1e-6 * np.eye(d)) @ (np.transpose(V) @ y)
+
+        # **** estimate gradient (by using the method above) ****#
+        y_antithetic = (np.concatenate([F_plus,F_minus]) - F_theta) / sigma
+        g = LP_Gradient(y_antithetic, epsilons_antithetic)
+
+        # **** update using Newton's method ****#
+        theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(H_diag, PT_threshold)) @ (dct_mtx @ g))
+        F_t = F(theta_t)
+
+        # backtracking
+        cnt = 0
+        while F(theta_t_)[0] < (
+                F_t + alpha * eta * np.transpose(g) @ dct_mtx @ (np.diag(get_PTinverse(H_diag, PT_threshold)) @ (dct_mtx @ g)))[
+            0]:
+            if cnt >= 30:
+                break
+            cnt += 1
+            eta *= beta
+            theta_t_ = theta_t - eta * dct_mtx @ (np.diag(get_PTinverse(H_diag, PT_threshold)) @ (dct_mtx @ g))
+        theta_t = theta_t_
+        count += cnt
+
+        # Can delete, not really useful
+        H = dct_mtx @ np.diag(H_diag) @ dct_mtx
+
+        # **** record current status ****#
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+
+    return theta_t, F(theta_t), H, lst_evals, lst_f
 
