@@ -581,25 +581,23 @@ def LP_Hessian_structured_v6(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
         F_theta = F(theta_t)
         count += 2 * num_samples + 1
 
-        # **** estimate Hessian ****#
-        # y = (F_plus + F_minus - 2 * F_theta) / (sigma ** 2)
-        # var_z = cp.Variable(n)
-        # var_H_diag = cp.Variable(d)
-        # dct_mtx = get_dct_mtx(d)
-        # obj = sum(var_z)
-        # constraints = []
-        # for i in range(n):
-        #     Uv = epsilons[i:i + 1, :] @ dct_mtx
-        #     Uv_sq = Uv * Uv
-        #     constraints += [var_z[i] >= y[i] - Uv_sq @ var_H_diag]
-        #     constraints += [var_z[i] >= - y[i] + Uv_sq @ var_H_diag]
-         # for i in range(d):
-        #     constraints += [var_H_diag[i] <= 0]
-        # prob = cp.Problem(cp.Minimize(obj), constraints)
-        # prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
-        # if not prob.status == 'optimal':
-        #     print("LP not optimized for the structured Hessian method:(")
-        #     return None
+        # Estimate Hessian
+        y = (F_plus + F_minus - 2*F_theta) / (sigma**2)
+        var_H_diag = cp.Variable(d)
+        dct_mtx = get_dct_mtx(d)
+        constraints = []
+        obj = 0
+        for i in range(d):
+            constraints += [var_H_diag[i] <= 0]
+        for i in range(n):
+            Uv = epsilons[i:i + 1, :] @ dct_mtx
+            Uv_sq = Uv * Uv
+            obj += (y[i] - Uv_sq @ var_H_diag)**2
+        prob = cp.Problem(cp.Minimize(obj), constraints)
+        prob.solve(solver=cp.OSQP)
+        if not prob.status=='optimal':
+            print("QP not optimized for the structured Hessian method:<")
+            return None
 
         # **** estimate gradient (by using the method above) ****#
         y_antithetic = (np.concatenate([F_plus,F_minus]) - F_theta) / sigma
