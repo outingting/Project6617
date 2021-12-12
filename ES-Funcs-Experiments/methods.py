@@ -7,9 +7,26 @@
 # LP_Hessian_structured is a modified version of LP_Hessian, while we are minimizing over the space of matrices of a specific form
 
 import numpy as np
+from sklearn.decomposition import PCA
 from scipy.stats import multivariate_normal
 import cvxpy as cp
 import copy
+from scipy.linalg import cholesky
+from numpy.random import standard_normal
+from numpy.linalg import LinAlgError
+
+#########################################################################################################
+
+# Helper functions of the optimizers
+
+def Adam(dx, m, v, learning_rate, t, eps = 1e-8, beta1 = 0.9, beta2 = 0.999):
+    m = beta1 * m + (1 - beta1) * dx
+    mt = m / (1 - beta1 ** t)
+    v = beta2 * v + (1-beta2) * (dx **2)
+    vt = v / (1 - beta2 ** t)
+    update = learning_rate * mt / (np.sqrt(vt) + eps)
+    return(update, m, v)
+
 
 def LP_Gradient(y, epsilons):
     """
@@ -692,4 +709,105 @@ def LP_Hessian_structured_v7(F, alpha, sigma, sigma_g, theta_0, num_samples, tim
         lst_f.append(F(theta_t))
 
     return theta_t, F(theta_t), H, lst_evals, lst_f
+
+
+#########################################################################################################
+
+def asebo_function_eval(F, theta, A, n_samples):
+    # A = sigma * epsilon, A shape is (n, d)
+    # A[i] = sigma * the i-th epsilon
+    all_rollouts = np.zeros([n_samples, 2]) # First Row = F_plus, Second Row = F_minus
+    for i in range(n_samples):
+        all_rollouts[i, 0] = F(theta + A[i])# F plus 
+        all_rollouts[i, 1] = F(theta - A[i]) # F minus
+    all_rollouts = (all_rollouts - np.mean(all_rollouts)) / (np.std(all_rollouts)  + 1e-8)
+
+    F_diff = np.array(all_rollouts[:, 0] - all_rollouts[:, 1])
+    return F_diff
+
+
+def asebo(F, sigma, learning_rate, decay, k, theta_0, min_samples, num_sensings, max_iter, use_log, threshold):
+
+    theta_t = copy.deepcopy(theta_0)
+
+    if use_log:
+        num_sensings = 4 + int(3 * np.log(d))
+
+    m = 0 ; v = 0; d = len(theta_0); 
+
+    k = min(k, d); count = 0; alpha = 1
+
+    n_iter = 1; G = []
+
+    lst_evals = []; lst_f = []
+
+    while n_iter < max_iter:
+
+        # ES method of ASEBO
+        if n_iter >= k:
+            pca = PCA()
+            pca_fit = pca.fit(G)
+            var_exp = pca_fit.explained_variance_ratio_
+            var_exp = np.cumsum(var_exp)
+            n_samples = np.argmax(var_exp > threshold) + 1
+            n_samples = max(n_samples, min_samples)
+            U = pca_fit.components_[:n_samples]
+            UUT = np.matmul(np.transpose(U), U)
+            U_ort = pca_fit.components_[n_samples:]
+            UUT_ort = np.matmul(np.transpose(U_ort), U_ort)
+            if n_iter == k:
+                n_samples = num_sensings
+        else:
+            UUT = np.zeros([d,d])
+            alpha = 1
+            n_samples = num_sensings
+
+        # get the matrix A (which is the sigma * epsilons)
+        np.random.seed(1)
+        cov = (alpha/d) * np.eye(d) + ((1-alpha) / n_samples) * UUT
+        cov *= sigma
+        mu = np.repeat(0, d)
+        A = np.zeros((n_samples, d))
+        try:
+            l = cholesky(cov, check_finite=False, overwrite_a=True)
+            for i in range(n_samples):
+                try:
+                    A[i] = np.zeros(d) + l.dot(standard_normal(d))
+                except LinAlgError:
+                    A[i] = np.random.randn(d)
+        except LinAlgError:
+            for i in range(n_samples):
+                A[i] = np.random.randn(d)  
+        A /= np.linalg.norm(A, axis =-1)[:, np.newaxis]
+
+        # do function evaluations 
+        F_diff = asebo_function_eval(F, theta_t, A, n_samples)
+        count += 2 * n_samples
+
+        # process the gradient
+        g = np.zeros(d)
+        for i in range(n_samples):
+            eps = A[i, :]
+            g += eps *  F_diff[i]
+        g /= (2 * sigma)
+        if n_iter >= k:
+            alpha = np.linalg.norm(np.dot(g, UUT_ort))/np.linalg.norm(np.dot(g, UUT))
+        if n_iter == 1:
+            G = np.array(g)
+        else:
+            G *= decay
+            G = np.vstack([G, g])
+        g/= (np.linalg.norm(g) / d + 1e-8)
+
+        # update the current theta value
+        update, m, v = Adam(g, m, v, learning_rate, n_iter)
+        theta_t += update
+        n_iter += 1
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+
+    return theta_t, F(theta_t), lst_evals, lst_f
+
+
+
 
