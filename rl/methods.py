@@ -3,10 +3,15 @@ import pandas as pd
 import cvxpy as cp
 import gym
 import os
+from sklearn.linear_model import LinearRegression
 from numpy.linalg import LinAlgError
+from scipy.linalg import cholesky
+from scipy.stats import ortho_group
+from numpy.random import standard_normal
 from asebo.worker import get_policy, worker
 from asebo.es import ES
 from asebo.optimizers import Adam
+
 
 
 def Gradient_LP(y, epsilons):
@@ -14,18 +19,25 @@ def Gradient_LP(y, epsilons):
     y = (F(theta + sigma*epsilons) - F(theta)) / sigma
     epsilons: the perturbations with UNIT VARIANCE
     """
-    n, d = epsilons.shape
-    
-    var_z = cp.Variable(n)
+    _, d = epsilons.shape
     var_g = cp.Variable(d)
-    obj = sum(var_z)
-    constraints = [var_z >= y - epsilons @ var_g,
-                   var_z >= -y + epsilons @ var_g]
+    constraints = []
+    obj = cp.norm1(y-epsilons @ var_g)
+
     prob = cp.Problem(cp.Minimize(obj), constraints)
-    prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+    prob.solve(solver=cp.GUROBI)
     if prob.status == 'optimal':
         return var_g.value
-    return None
+    raise ValueError("Gradient LP did not converge: %s" % prob.status)
+
+def Gradient_L2(y, epsilons):
+    """
+    y = (F(theta + sigma*epsilons) - F(theta)) / sigma
+    epsilons: the perturbations with UNIT VARIANCE
+    """
+    reg = LinearRegression(fit_intercept=False)
+    reg.fit(epsilons, y)
+    return reg.coef_
 
 def Hessian_LP(y, epsilons):
     """
@@ -99,6 +111,15 @@ def get_PTinverse(diag_H, PT_threshold=-1):
     diag_H[diag_H >= PT_threshold] = PT_threshold
     return diag_H ** (-1)
 
+def Hessian_L2_structured(y, epsilons):
+    reg = LinearRegression(fit_intercept=False)
+
+    _, d = epsilons.shape
+    dct_mtx = get_dct_mtx(d)
+    Uv_sq = (epsilons@dct_mtx)**2
+
+    reg.fit(Uv_sq, y)
+    return reg.coef_, dct_mtx
 
 def Hessian_LP_structured(y, epsilons, new=True):
     """
@@ -161,13 +182,13 @@ def aggregate_rollouts_hessianES(master, A, params):
     all_rollouts = (all_rollouts - np.mean(all_rollouts)) / (np.std(all_rollouts)  + 1e-8)
     return all_rollouts, timesteps
 
-def gradient_LP_estimator(all_rollouts, A, sigma):
+def gradient_LP_estimator(all_rollouts, A, sigma, SigmaInv=None):
     # (F(theta + sigma*epsilons) - F(theta)) / sigma
     gradient_y = np.array(all_rollouts[:-1, 0] - sum(all_rollouts[-1])/2) / sigma
     g = Gradient_LP(gradient_y, A[:-1, :]/sigma)
     
     return g
-def gradient_LP_antithetic_estimator(all_rollouts, A, sigma):
+def gradient_LP_antithetic_estimator(all_rollouts, A, sigma, SigmaInv=None):
     gradient_y = np.array(
             np.concatenate([all_rollouts[:-1, 0], all_rollouts[:-1, 1]])
             - sum(all_rollouts[-1])/2
@@ -175,13 +196,24 @@ def gradient_LP_antithetic_estimator(all_rollouts, A, sigma):
     epsilons = np.vstack([A[:-1, :]/sigma,-A[:-1, :]/sigma])
     g = Gradient_LP(gradient_y, epsilons)
     return g
+def gradient_L2_antithetic_estimator(all_rollouts, A, sigma, SigmaInv=None):
+    gradient_y = np.array(
+            np.concatenate([all_rollouts[:-1, 0], all_rollouts[:-1, 1]])
+            - sum(all_rollouts[-1])/2
+        ) / sigma
+    epsilons = np.vstack([A[:-1, :]/sigma,-A[:-1, :]/sigma])
+    g = Gradient_L2(gradient_y, epsilons)
+    return g
 
-def gradient_antithetic_estimator(all_rollouts, A, sigma):
+def gradient_antithetic_estimator(all_rollouts, A, sigma, SigmaInv=None):
+    _, d = A.shape
+    if SigmaInv is None:
+        SigmaInv = np.identity(d)
     gradient_y = np.array(
             np.concatenate([all_rollouts[:-1, 0], all_rollouts[:-1, 1]])
             )
     epsilons = np.vstack([A[:-1, :]/sigma,-A[:-1, :]/sigma])
-    g = (gradient_y@epsilons) / sigma / len(gradient_y)
+    g = (gradient_y@(epsilons@SigmaInv)) / sigma / len(gradient_y)
     return g
     
 def invHessian_LP_estimator(all_rollouts, A, sigma, H_lambda=1):
@@ -201,7 +233,16 @@ def invHessian_LP_structured_PTinv_estimator(all_rollouts, A, sigma, PT_threshol
     # (F(theta + sigma*epsilons) + F(theta - sigma*epsilons) - 2*F(theta)) / (sigma**2)
     _, d = A.shape
     hessian_y = np.array(all_rollouts[:-1, 0] + all_rollouts[:-1, 1] - sum(all_rollouts[-1])) / (sigma**2)
-    var_H_diag, dct_mtx = Hessian_LP_structured(hessian_y, A[:-1, :]/sigma, True)
+    var_H_diag, dct_mtx = Hessian_LP_structured(hessian_y, A[:-1, :]/sigma)
+    Hinv = dct_mtx @ (np.diag(get_PTinverse(var_H_diag, PT_threshold)) @ dct_mtx)
+    return Hinv
+
+
+def invHessian_L2_structured_PTinv_estimator(all_rollouts, A, sigma, PT_threshold=-1):
+    # (F(theta + sigma*epsilons) + F(theta - sigma*epsilons) - 2*F(theta)) / (sigma**2)
+    _, d = A.shape
+    hessian_y = np.array(all_rollouts[:-1, 0] + all_rollouts[:-1, 1] - sum(all_rollouts[-1])) / (sigma**2)
+    var_H_diag, dct_mtx = Hessian_L2_structured(hessian_y, A[:-1, :]/sigma)
     Hinv = dct_mtx @ (np.diag(get_PTinverse(var_H_diag, PT_threshold)) @ dct_mtx)
     
     return Hinv
@@ -214,28 +255,59 @@ def invHessian_identity_estimator(all_rollouts, A, sigma, H_lambda=1):
 
 def HessianES(params, master, gradient_estimator, invhessian_estimator):
     n_samples = params['num_sensings']    
-    cov = np.identity(master.N)*(params["sigma"]**2)
+    cov = np.identity(master.N)
     mu = np.repeat(0, master.N)
     A = np.random.multivariate_normal(mu, cov, n_samples)
+    A *= params["sigma"]
     A = np.vstack([A, mu]) # Adding a reference evaluation
         
     rollouts, timesteps = aggregate_rollouts_hessianES(master, A, params)
     
     g = gradient_estimator(rollouts, A, params["sigma"])
     invH = invhessian_estimator(rollouts, A, params["sigma"])
-    
 
     return(g, invH, n_samples, timesteps)
 
+def orthogonal_gaussian(d, n_samples):
+    blocks = n_samples//d + (n_samples%d >0)
+    out = np.concatenate([ortho_group.rvs(d) for _ in range(blocks)])[:n_samples]
+    norms = np.sqrt(np.random.chisquare(d, size=n_samples))
+    out = (out.T * norms).T
+    return out
+
+    
+
+def HessianESv2(params, master, gradient_estimator, invhessian_estimator, cov=None):
+    """
+    Samples from invHessian of previous round
+    """
+    n_samples = params['num_sensings']    
+    if cov is None:
+        cov = np.identity(master.N)
+    mu = np.repeat(0, master.N)
+
+    # A = np.random.multivariate_normal(mu, cov, n_samples)
+    A = orthogonal_gaussian(master.N, n_samples)
+    # A /= np.linalg.norm(A, axis =-1)[:, np.newaxis]
+    A *= params["sigma"] 
+    A = np.vstack([A, mu]) # Adding a reference evaluation
+        
+    rollouts, timesteps = aggregate_rollouts_hessianES(master, A, params)
+    
+    g = gradient_estimator(rollouts, A, params["sigma"], np.linalg.inv(cov))
+    invH = invhessian_estimator(rollouts, A, params["sigma"])
+    return(g, invH, n_samples, timesteps)
+
+
 def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None):
-    params['dir'] = params['env_name'] + params['policy'] + '_h' + str(params['h_dim']) + '_lr' + str(params['learning_rate']) + '_num_sensings' + str(params['num_sensings']) +'_' + params['filename']
+    params['dir'] = params['env_name'] + params['policy'] + '_h' + str(params['h_dim']) + '_lr' + str(params['learning_rate']) \
+                    + '_num_sensings' + str(params['num_sensings']) +'_' + 'sampleFromInvH'+ str(params['sample_from_invH'])
     data_folder = './data/'+params['dir']+'_hessianES'
     if not(os.path.exists(data_folder)):
         os.makedirs(data_folder)
     if not master:
         master = get_policy(params)
     print("Policy Dimension: ", master.N)
-    np.random.seed(None)
 
     test_policy = worker(params, master, np.zeros([1, master.N]), 0)
     reward = test_policy.rollout(train=False)
@@ -247,10 +319,13 @@ def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None)
     rollouts = [0]
     rewards = [reward]
     samples = [0]
+    cov = np.identity(master.N)
+    np.random.seed(params['seed'])
     while n_iter < params['max_iter']:
         params['n_iter'] = n_iter
-        g, invH, n_samples, timesteps = HessianES(params, master, gradient_estimator, invhessian_estimator)
-
+        g, invH, n_samples, timesteps = HessianESv2(params, master, gradient_estimator, invhessian_estimator, cov)
+        if params['sample_from_invH']:
+            cov = -invH
         update_direction = -invH@g
         lr = params['learning_rate']
         # Backtracking
@@ -295,7 +370,7 @@ def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None)
         rewards.append(reward)
         samples.append(n_samples)
 
-        print('Iteration: %s, Leanring Rate: %s, Rollouts: %s, Reward: %s, Samples: %s' %(n_iter, lr, n_eps, reward,  n_samples))
+        print('Iteration: %s, Leanring Rate: %.3e, Rollouts: %s, Reward: %.2f, Update Direction Norm: %.2f' %(n_iter, lr, n_eps, reward,  np.linalg.norm(update_direction)))
         n_iter += 1
 
         out = pd.DataFrame({'Rollouts': rollouts, 'Learning Rate':
@@ -304,7 +379,7 @@ def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None)
         out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
         index=False)   
 
-        np.save("{}/hessianES_params.npy".format(data_folder),
+        np.save("{}/hessianES_params_seed{}.npy".format(data_folder, params['seed']),
         master.params)
 
     return ts, rewards, master
@@ -313,7 +388,8 @@ def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None)
 
 
 def run_asebo(params, master=None):
-    params['dir'] = params['env_name'] + params['policy'] + '_h' + str(params['h_dim']) + '_lr' + str(params['learning_rate']) + '_num_sensings' + str(params['num_sensings']) +'_' + params['filename']
+    params['dir'] = params['env_name'] + params['policy'] + '_h' + str(params['h_dim']) + '_lr' + str(params['learning_rate']) \
+                    + '_num_sensings' + str(params['num_sensings']) +'_' + 'sampleFromInvH'+ str(params['sample_from_invH'])
     data_folder = './data/'+params['dir']+'_asebo'
     if not(os.path.exists(data_folder)):
         os.makedirs(data_folder) 
@@ -384,6 +460,6 @@ def run_asebo(params, master=None):
         out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
         index=False)   
 
-        np.save("{}/asebo_params.npy".format(data_folder),
+        np.save("{}/asebo_params_seed{}.npy".format(data_folder, params['seed']),
         master.params)
     return ts, rewards, master
