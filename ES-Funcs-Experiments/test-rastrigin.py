@@ -3,7 +3,7 @@
 import numpy as np
 import math
 from scipy.stats import multivariate_normal
-from methods import ES_Hessian, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured, LP_Hessian_structured_v2, LP_Hessian_structured_v3, LP_Hessian_structured_v4, LP_Hessian_structured_v5, LP_Hessian_structured_v6, LP_Hessian_structured_v7
+from methods import ES_Hessian, ES_Hessian_v2, ES_vanilla_gradient, Hess_Aware, LP_Gradient, LP_Hessian, LP_Hessian_structured, LP_Hessian_structured_v2, LP_Hessian_structured_v3, LP_Hessian_structured_v4, LP_Hessian_structured_v5, LP_Hessian_structured_v6, LP_Hessian_structured_v7
 import cvxpy as cp
 import matplotlib.pyplot as plt 
 

@@ -151,6 +151,43 @@ def ES_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, p = 1, H_lambd
 
 #########################################################################################################
 
+def ES_Hessian_v2(F, alpha, sigma, theta_0, num_samples, time_steps, p = 1, H_lambda = 0, seed=1):
+    np.random.seed(seed)
+    count = 0
+    lst_evals = []
+    lst_f = [] 
+    d = theta_0.shape[0]
+    theta_t = copy.deepcopy(theta_0)
+    n = num_samples
+    H = None
+    for t in range(time_steps):
+        
+        #**** sample epsilons ****#
+        epsilons = np.random.multivariate_normal(mean = np.zeros(d), cov = np.identity(d), size = num_samples) # n by d
+
+        #**** compute Hessian every p steps ****#
+        if t % p == 0:
+            eps = np.expand_dims(epsilons, -1)
+            F_plus = F(theta_t + sigma*epsilons)
+            F_minus = F(theta_t - sigma*epsilons)
+            count += 2*num_samples
+            H_samples = ((eps*np.transpose(eps, (0, 2, 1)) - np.identity(d))* F_plus.reshape(-1, 1, 1))/(sigma**2)
+            H = H_samples.mean(axis=0)
+
+        #**** compute g by simulation ****#
+        g = simulation_Gradient(np.concatenate([F_plus, F_minus]), 2*num_samples, np.vstack([epsilons, -epsilons]), sigma)
+            
+        #**** update using Newton's method ****#
+        theta_t -= alpha * np.linalg.inv(H)@g
+
+        #**** record current status ****#
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+        
+    return theta_t, F(theta_t), H, lst_evals, lst_f
+
+#########################################################################################################
+
 def Hess_Aware(F, alpha, sigma, theta_0, num_samples, time_steps, p = 1, H_lambda = 0, seed=1):
     np.random.seed(seed)
     count = 0
@@ -225,9 +262,7 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
                 break
             X[:,idx:idx+d-j-1] = 2 * epsilons[:,j:j+1] * epsilons[:,j+1:]
             idx += d-j-1
-#         for j in range(d):
-#             X[:,j*(j+1)//2:(j+1)*(j+2)//2-1] = 2 * epsilons[:,j:j+1] * epsilons[:,:j]
-#             X[:,(j+1)*(j+2)//2-1] = epsilons[:,j]**2
+
         var_z = cp.Variable(n)
         var_H = cp.Variable(d*(d+1)//2)
         obj = sum(var_z)
@@ -237,6 +272,7 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
             constraints += [var_z[i] >= - y[i] + X[i] @ var_H]
         prob = cp.Problem(cp.Minimize(obj), constraints)
         prob.solve(solver=cp.GLPK, eps=1e-6, glpk={'msg_lev': 'GLP_MSG_OFF'})
+
         if prob.status == 'optimal':
             H = np.zeros((d,d))
             idx = 0
@@ -244,12 +280,18 @@ def LP_Hessian(F, alpha, sigma, theta_0, num_samples, time_steps, seed=1):
                 H[j,j:] = var_H[idx:idx+d-j].value
                 H[j:,j] = var_H[idx:idx+d-j].value
                 idx += d-j
-#             for j in range(d):
-#                 H[j,0:j+1] = var_H[j*(j+1)//2:(j+1)*(j+2)//2].value
-#                 H[1:j+1,j] = H[j,1:j+1]
         else:
             print("LP not optimized for LP Hessian method.")
             return None
+
+        #**** update using Newton's method ****#
+        theta_t -= alpha * np.linalg.inv(H)@g
+
+        #**** record current status ****#
+        lst_evals.append(count)
+        lst_f.append(F(theta_t))
+
+    return theta_t, F(theta_t), H, lst_evals, lst_f
 
 #########################################################################################################
 
@@ -295,8 +337,6 @@ def LP_Hessian_structured(F, alpha, sigma, theta_0, num_samples, time_steps, H_l
         #**** estimate gradient (by using the method above) ****#
         y = (F_plus - F(theta_t)) / sigma
         g = LP_Gradient(y, epsilons)
-
-        # import pdb; pdb.set_trace()
 
         #**** update using Newton's method ****#
         theta_t -= alpha * np.linalg.inv(H)@g
@@ -806,7 +846,7 @@ def asebo(F, sigma, learning_rate, decay, k, theta_0, min_samples, num_sensings,
         lst_evals.append(count)
         lst_f.append(F(theta_t))
 
-    return theta_t, F(theta_t), lst_evals, lst_f
+    return theta_t, F(theta_t), None, lst_evals, lst_f
 
 
 
