@@ -1,11 +1,14 @@
 import numpy as np
+from numpy.core.numeric import roll
 import pandas as pd
 import gym
 import os
+from sklearn.decomposition import PCA
+from scipy.linalg import cholesky
 from numpy.linalg import LinAlgError
 from numpy.random import standard_normal
 from asebo.worker import get_policy, worker
-from asebo.es import ES
+from asebo.es import ES, aggregate_rollouts
 from asebo.optimizers import Adam
 
 from utils import Gradient_LP, Gradient_L2, Hessian_LP, Hessian_LP_structured, Hessian_L2_structured, get_PTinverse, orthogonal_gaussian
@@ -134,6 +137,7 @@ def HessianES(params, master, gradient_estimator, invhessian_estimator, cov=None
     mu = np.repeat(0, master.N)
 
     # A = np.random.multivariate_normal(mu, cov, n_samples)
+    np.random.seed(None)
     A = orthogonal_gaussian(master.N, n_samples)
     # A /= np.linalg.norm(A, axis =-1)[:, np.newaxis]
     A *= params["sigma"] 
@@ -144,6 +148,66 @@ def HessianES(params, master, gradient_estimator, invhessian_estimator, cov=None
     g = gradient_estimator(rollouts, A, params["sigma"], np.linalg.inv(cov))
     invH = invhessian_estimator(rollouts, A, params["sigma"])
     return(g, invH, n_samples, timesteps)
+
+def HessianASEBO(params, master, G):
+    if params['n_iter'] >= params['k']:
+        pca = PCA()
+        pca_fit = pca.fit(G)
+        var_exp = pca_fit.explained_variance_ratio_
+        var_exp = np.cumsum(var_exp)
+        n_samples = np.argmax(var_exp > params['threshold']) + 1
+        if n_samples < params['min']:
+            n_samples = params['min']
+        U = pca_fit.components_[:n_samples]
+        UUT = np.matmul(U.T, U)
+        U_ort = pca_fit.components_[n_samples:]
+        UUT_ort = np.matmul(U_ort.T, U_ort)
+        alpha = params['alpha']
+        if params['n_iter'] == params['k']:
+            n_samples = params['num_sensings']
+    else:
+        UUT = np.zeros([master.N, master.N])
+        alpha = 1
+        n_samples = params['num_sensings']
+    
+    np.random.seed(None)
+    cov = (alpha/master.N) * np.eye(master.N) + ((1-alpha) / n_samples) * UUT
+    # cov = (alpha) * np.eye(master.N) + ((1-alpha) / n_samples * master.N) * UUT
+    cov *= params['sigma']
+    mu = np.repeat(0, master.N)
+    #A = np.random.multivariate_normal(mu, cov, n_samples)
+    A = np.zeros((n_samples, master.N))
+    try:
+        l = cholesky(cov, check_finite=False, overwrite_a=True)
+        for i in range(n_samples):
+            try:
+                A[i] = np.zeros(master.N) + l.dot(standard_normal(master.N))
+            except LinAlgError:
+                A[i] = np.random.randn(master.N)
+    except LinAlgError:
+        for i in range(n_samples):
+            A[i] = np.random.randn(master.N)  
+    A /= np.linalg.norm(A, axis =-1)[:, np.newaxis]
+        
+    # m, timesteps = aggregate_rollouts(master, A, params, n_samples)
+    A = np.vstack([A, mu]) # Adding a reference evaluation
+    all_rollouts, timesteps = aggregate_rollouts_hessianES(master, A, params)
+    g = gradient_antithetic_estimator(all_rollouts, A, params["sigma"])
+    invH = invHessian_LP_structured_PTinv_estimator(all_rollouts, A, params["sigma"])
+    update_direction = -invH@g
+    
+    # g = np.zeros(master.N)
+    # for i in range(n_samples):
+    #     eps = A[i, :]
+    #     g += eps * m[i]
+    # g /= (2 * params['sigma'])
+    
+    if params['n_iter'] >= params['k']:
+        params['alpha'] = np.linalg.norm(np.dot(g, UUT_ort))/np.linalg.norm(np.dot(g, UUT))
+    
+    return(update_direction, n_samples, timesteps)
+
+
 
 def create_data_folder_name(params):
     return params['env_name'] + params['policy'] + '_h' + str(params['h_dim']) + '_lr' + str(params['learning_rate']) \
@@ -170,7 +234,7 @@ def run_HessianES(params, gradient_estimator, invhessian_estimator, master=None,
     samples = [0]
     cov = np.identity(master.N)
     np.random.seed(params['seed'])
-    while n_iter < params['max_iter']:
+    while ts_cumulative < params['max_ts']:
         params['n_iter'] = n_iter
         g, invH, n_samples, timesteps = HessianES(params, master, gradient_estimator, invhessian_estimator, cov)
         if params['sample_from_invH']:
@@ -278,7 +342,7 @@ def run_asebo(params, master=None):
     alphas = [1]
     G = []
         
-    while n_iter < params['max_iter']:
+    while ts_cumulative < params['max_ts']:
             
         params['n_iter'] = n_iter
         gradient, n_samples, timesteps = ES(params, master, G)
@@ -296,6 +360,92 @@ def run_asebo(params, master=None):
         gradient /= (np.linalg.norm(gradient) / master.N + 1e-8)
             
         update, m, v = Adam(gradient, m, v, params['learning_rate'], n_iter)
+            
+        master.update(update)
+        test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        reward = test_policy.rollout(train=False)
+        rewards.append(reward)
+        samples.append(n_samples)
+            
+        # print('Iteration: %s, Rollouts: %s, Reward: %s, Alpha: %s, Samples: %s' %(n_iter, n_eps, reward, params['alpha'], n_samples))
+        print('Iteration: %s, Alpha: %s, Time Steps: %.2e, Reward: %.2f, Update Direction Norm: %.2f' %(n_iter, params['alpha'], ts_cumulative, reward,  np.linalg.norm(gradient)))
+        n_iter += 1
+
+
+        out = pd.DataFrame({'Rollouts': rollouts, 'Learning Rate':
+        params['learning_rate'], 'Reward': rewards, 'Samples': samples,
+        'Timesteps': ts, 'Alpha': alphas})
+        out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
+        index=False)   
+
+        np.save("{}/asebo_params_seed{}.npy".format(data_folder, params['seed']),
+        master.params)
+    return ts, rewards, master
+
+
+
+
+def run_hessian_asebo(params, master=None):
+    params['dir'] = create_data_folder_name(params)
+    data_folder = './data/'+params['dir']+'_hessian_asebo'
+    if not(os.path.exists(data_folder)):
+        os.makedirs(data_folder) 
+
+    env = gym.make(params['env_name'])
+    params['ob_dim'] = env.observation_space.shape[0]
+    params['ac_dim'] = env.action_space.shape[0]
+    
+    m = 0
+    v = 0
+
+    params['k'] += -1
+    params['alpha'] = 1
+        
+    params['zeros'] = False
+    if not master:
+        master = get_policy(params)
+    print("Policy Dimension: ", master.N)
+    
+    if params['log']:
+        params['num_sensings'] = 4 + int(3 * np.log(master.N))
+    
+    if params['k'] > master.N:
+        params['k'] = master.N
+        
+    test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+    reward = test_policy.rollout(train=False)
+
+    n_eps = 0
+    n_iter = 1
+    ts_cumulative = 0
+    ts = [0]
+    rollouts = [0]
+    rewards = [reward]
+    samples = [0]
+    alphas = [1]
+    G = []
+        
+    while ts_cumulative < params['max_ts']:
+            
+        params['n_iter'] = n_iter
+        gradient, n_samples, timesteps = HessianASEBO(params, master, G)
+        ts_cumulative += timesteps
+        ts.append(ts_cumulative)
+        alphas.append(params['alpha'])
+
+        if n_iter == 1:
+            G = np.array(gradient)
+        else:
+            G *= params['decay']
+            G = np.vstack([G, gradient])
+        n_eps += 2 * n_samples
+        rollouts.append(n_eps)
+
+
+        gradient /= (np.linalg.norm(gradient) / master.N + 1e-8)
+        # update = gradient * params['learning_rate']
+        update, m, v = Adam(gradient, m, v, params['learning_rate'], n_iter)
+
             
         master.update(update)
         test_policy = worker(params, master, np.zeros([1, master.N]), 0)
