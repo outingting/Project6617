@@ -315,7 +315,7 @@ def run_asebo(params, master=None):
     m = 0
     v = 0
 
-    params['k'] += -1
+    # params['k'] += -1
     params['alpha'] = 1
         
     params['zeros'] = False
@@ -398,7 +398,7 @@ def run_hessian_asebo(params, master=None):
     m = 0
     v = 0
 
-    params['k'] += -1
+    # params['k'] += -1
     params['alpha'] = 1
         
     params['zeros'] = False
@@ -450,6 +450,302 @@ def run_hessian_asebo(params, master=None):
         master.update(update)
         test_policy = worker(params, master, np.zeros([1, master.N]), 0)
         reward = test_policy.rollout(train=False)
+        rewards.append(reward)
+        samples.append(n_samples)
+            
+        # print('Iteration: %s, Rollouts: %s, Reward: %s, Alpha: %s, Samples: %s' %(n_iter, n_eps, reward, params['alpha'], n_samples))
+        print('Iteration: %s, Alpha: %s, Time Steps: %.2e, Reward: %.2f, Update Direction Norm: %.2f' %(n_iter, params['alpha'], ts_cumulative, reward,  np.linalg.norm(gradient)))
+        n_iter += 1
+
+
+        out = pd.DataFrame({'Rollouts': rollouts, 'Learning Rate':
+        params['learning_rate'], 'Reward': rewards, 'Samples': samples,
+        'Timesteps': ts, 'Alpha': alphas})
+        out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
+        index=False)   
+
+        np.save("{}/asebo_params_seed{}.npy".format(data_folder, params['seed']),
+        master.params)
+    return ts, rewards, master
+
+
+
+def run_hessian_asebo2(params, master=None):
+    """
+    Same as run_hessian_asebo, but removing adam 
+    """
+    params['dir'] = create_data_folder_name(params)
+    data_folder = './data/'+params['dir']+'_hessian_asebo2'
+    if not(os.path.exists(data_folder)):
+        os.makedirs(data_folder) 
+
+    env = gym.make(params['env_name'])
+    params['ob_dim'] = env.observation_space.shape[0]
+    params['ac_dim'] = env.action_space.shape[0]
+    
+    m = 0
+    v = 0
+
+    # params['k'] += -1
+    params['alpha'] = 1
+        
+    params['zeros'] = False
+    if not master:
+        master = get_policy(params)
+    print("Policy Dimension: ", master.N)
+    
+    if params['log']:
+        params['num_sensings'] = 4 + int(3 * np.log(master.N))
+    
+    if params['k'] > master.N:
+        params['k'] = master.N
+        
+    test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+    reward = test_policy.rollout(train=False)
+
+    n_eps = 0
+    n_iter = 1
+    ts_cumulative = 0
+    ts = [0]
+    rollouts = [0]
+    rewards = [reward]
+    samples = [0]
+    alphas = [1]
+    G = []
+        
+    while ts_cumulative < params['max_ts']:
+            
+        params['n_iter'] = n_iter
+        gradient, n_samples, timesteps = HessianASEBO(params, master, G)
+        ts_cumulative += timesteps
+        ts.append(ts_cumulative)
+        alphas.append(params['alpha'])
+
+        if n_iter == 1:
+            G = np.array(gradient)
+        else:
+            G *= params['decay']
+            G = np.vstack([G, gradient])
+        n_eps += 2 * n_samples
+        rollouts.append(n_eps)
+
+
+        gradient /= (np.linalg.norm(gradient) / master.N + 1e-8)
+        update = gradient * params['learning_rate']
+        # update, m, v = Adam(gradient, m, v, params['learning_rate'], n_iter)
+
+            
+        master.update(update)
+        test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        reward = test_policy.rollout(train=False)
+        rewards.append(reward)
+        samples.append(n_samples)
+            
+        # print('Iteration: %s, Rollouts: %s, Reward: %s, Alpha: %s, Samples: %s' %(n_iter, n_eps, reward, params['alpha'], n_samples))
+        print('Iteration: %s, Alpha: %s, Time Steps: %.2e, Reward: %.2f, Update Direction Norm: %.2f' %(n_iter, params['alpha'], ts_cumulative, reward,  np.linalg.norm(gradient)))
+        n_iter += 1
+
+
+        out = pd.DataFrame({'Rollouts': rollouts, 'Learning Rate':
+        params['learning_rate'], 'Reward': rewards, 'Samples': samples,
+        'Timesteps': ts, 'Alpha': alphas})
+        out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
+        index=False)   
+
+        np.save("{}/asebo_params_seed{}.npy".format(data_folder, params['seed']),
+        master.params)
+    return ts, rewards, master
+
+
+
+def run_hessian_asebo3(params, master=None):
+    """
+    Same as run_hessian_asebo2, but replacing normalization of gradient with adaptive stepsize
+    """
+    params['dir'] = create_data_folder_name(params)
+    data_folder = './data/'+params['dir']+'_hessian_asebo3'
+    if not(os.path.exists(data_folder)):
+        os.makedirs(data_folder) 
+
+    env = gym.make(params['env_name'])
+    params['ob_dim'] = env.observation_space.shape[0]
+    params['ac_dim'] = env.action_space.shape[0]
+    
+    m = 0
+    v = 0
+
+    # params['k'] += -1
+    params['alpha'] = 1
+        
+    params['zeros'] = False
+    if not master:
+        master = get_policy(params)
+    print("Policy Dimension: ", master.N)
+    
+    if params['log']:
+        params['num_sensings'] = 4 + int(3 * np.log(master.N))
+    
+    if params['k'] > master.N:
+        params['k'] = master.N
+        
+    test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+    reward = test_policy.rollout(train=False)
+
+    n_eps = 0
+    n_iter = 1
+    ts_cumulative = 0
+    ts = [0]
+    rollouts = [0]
+    rewards = [reward]
+    samples = [0]
+    alphas = [1]
+    G = []
+        
+    while ts_cumulative < params['max_ts']:
+            
+        params['n_iter'] = n_iter
+        gradient, n_samples, timesteps = HessianASEBO(params, master, G)
+        
+
+        if n_iter == 1:
+            G = np.array(gradient)
+        else:
+            G *= params['decay']
+            G = np.vstack([G, gradient])
+        n_eps += 2 * n_samples
+        rollouts.append(n_eps)
+
+        lr = params['learning_rate']
+        update = gradient * lr
+        master.update(update)
+        # Evaluate
+        test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        reward = test_policy.rollout(train=False)
+        count = 0
+        while (reward < rewards[-1]) and lr > 1e-30:
+            count += 1
+            master.update(-update) # Cancel the previous update first
+            lr *= params['beta']
+            update = lr*gradient
+            master.update(update)
+            # Evaluate
+            test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+            reward = test_policy.rollout(train=False)
+            timesteps += test_policy.timesteps
+
+        ts_cumulative += timesteps
+        ts.append(ts_cumulative)
+        alphas.append(params['alpha'])
+            
+        # master.update(update)
+        # test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        # reward = test_policy.rollout(train=False)
+        rewards.append(reward)
+        samples.append(n_samples)
+            
+        # print('Iteration: %s, Rollouts: %s, Reward: %s, Alpha: %s, Samples: %s' %(n_iter, n_eps, reward, params['alpha'], n_samples))
+        print('Iteration: %s, Alpha: %s, Time Steps: %.2e, Reward: %.2f, Update Direction Norm: %.2f' %(n_iter, params['alpha'], ts_cumulative, reward,  np.linalg.norm(gradient)))
+        n_iter += 1
+
+
+        out = pd.DataFrame({'Rollouts': rollouts, 'Learning Rate':
+        params['learning_rate'], 'Reward': rewards, 'Samples': samples,
+        'Timesteps': ts, 'Alpha': alphas})
+        out.to_csv('%s/Seed%s.csv' %(data_folder, params['seed']),
+        index=False)   
+
+        np.save("{}/asebo_params_seed{}.npy".format(data_folder, params['seed']),
+        master.params)
+    return ts, rewards, master
+
+
+
+
+def run_hessian_asebo4(params, master=None):
+    """
+    Same as run_hessian_asebo3, but with ADAM
+    """
+    params['dir'] = create_data_folder_name(params)
+    data_folder = './data/'+params['dir']+'_hessian_asebo4'
+    if not(os.path.exists(data_folder)):
+        os.makedirs(data_folder) 
+
+    env = gym.make(params['env_name'])
+    params['ob_dim'] = env.observation_space.shape[0]
+    params['ac_dim'] = env.action_space.shape[0]
+    
+    m = 0
+    v = 0
+
+    # params['k'] += -1
+    params['alpha'] = 1
+        
+    params['zeros'] = False
+    if not master:
+        master = get_policy(params)
+    print("Policy Dimension: ", master.N)
+    
+    if params['log']:
+        params['num_sensings'] = 4 + int(3 * np.log(master.N))
+    
+    if params['k'] > master.N:
+        params['k'] = master.N
+        
+    test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+    reward = test_policy.rollout(train=False)
+
+    n_eps = 0
+    n_iter = 1
+    ts_cumulative = 0
+    ts = [0]
+    rollouts = [0]
+    rewards = [reward]
+    samples = [0]
+    alphas = [1]
+    G = []
+        
+    while ts_cumulative < params['max_ts']:
+            
+        params['n_iter'] = n_iter
+        gradient, n_samples, timesteps = HessianASEBO(params, master, G)
+        
+
+        if n_iter == 1:
+            G = np.array(gradient)
+        else:
+            G *= params['decay']
+            G = np.vstack([G, gradient])
+        n_eps += 2 * n_samples
+        rollouts.append(n_eps)
+
+        
+        gradient, m, v = Adam(gradient, m, v, 1, n_iter)
+
+        lr = params['learning_rate']
+        update = gradient * lr
+        master.update(update)
+        # Evaluate
+        test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        reward = test_policy.rollout(train=False)
+        count = 0
+        while (reward < rewards[-1]) and lr > 1e-5:
+            count += 1
+            master.update(-update) # Cancel the previous update first
+            lr *= params['beta']
+            update = lr*gradient
+            master.update(update)
+            # Evaluate
+            test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+            reward = test_policy.rollout(train=False)
+            timesteps += test_policy.timesteps
+
+        ts_cumulative += timesteps
+        ts.append(ts_cumulative)
+        alphas.append(params['alpha'])
+            
+        # master.update(update)
+        # test_policy = worker(params, master, np.zeros([1, master.N]), 0)
+        # reward = test_policy.rollout(train=False)
         rewards.append(reward)
         samples.append(n_samples)
             
